@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ticket Scanner MVP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      touch-action: manipulation;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: auto;
+      padding: 20px;
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin-top: 40px;
+      width: 100%;
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .field {
+      margin-bottom: 15px;
+      width: 100%;
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      display: block;
+      text-align: center;
+    }
+
+    .primary {
+      background: #007bff;
+      color: white;
+    }
+
+    .secondary {
+      background: #28a745;
+      color: white;
+    }
+
+    .danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .preview {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 15px;
+      width: 100%;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    video {
+      width: 100%;
+      margin-top: 15px;
+      border-radius: 10px;
+    }
+
+    img {
+      width: 100%;
+      border-radius: 8px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .img-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .img-label {
+      font-size: 12px;
+      margin-top: 5px;
+      opacity: 0.7;
+      text-align: center;
+    }
+  </style>
+
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+
+<body>
+
+<div class="container">
+
+  <!-- STEP 1 -->
+  <div id="step1" class="card">
+    <h2>Ticket Info</h2>
+
+    <div class="field">
+      <label>Date</label>
+      <input type="date" id="date">
+    </div>
+
+    <div class="field">
+      <label>Technician</label>
+      <input type="text" id="technician" placeholder="Enter name">
+    </div>
+
+    <button class="btn primary" onclick="goToStep2()">
+      Continue
+    </button>
+  </div>
+
+  <!-- STEP 2 -->
+  <div id="step2" class="card hidden">
+    <h2>Upload Tickets</h2>
+
+    <label class="btn primary">
+      📁 Upload Photos
+      <input type="file" id="fileInput" multiple accept="image/*">
+    </label>
+
+    <button class="btn primary" onclick="startCamera()">
+      📷 Start Camera
+    </button>
+
+    <button class="btn danger hidden" id="closeCameraBtn" onclick="stopCamera()">
+      ❌ Close Camera
+    </button>
+
+    <button class="btn secondary hidden" id="captureBtn" onclick="capturePhoto()">
+      Capture Photo
+    </button>
+
+    <button class="btn primary" onclick="goToStep3()">
+      Continue to Step 3
+    </button>
+
+    <video id="video" autoplay playsinline class="hidden"></video>
+
+    <div class="preview" id="preview"></div>
+  </div>
+
+</div>
+
+<!-- STEP 3 (FIXED OUTSIDE STEP 2) -->
+<div id="step3" class="card hidden">
+
+  <h2>Step 3</h2>
+
+  <button class="btn primary" onclick="generatePDF()">
+    📄 Generate PDF
+  </button>
+
+  <p style="text-align:center;">
+    Review complete. Ready to export PDF.
+  </p>
+
+</div>
+
+<script>
+  let images = [];
+  let stream = null;
+
+  function goToStep2() {
+    const date = document.getElementById("date").value;
+    const technician = document.getElementById("technician").value;
+
+    if (!date || !technician) {
+      alert("Please fill in both fields");
+      return;
+    }
+
+    document.getElementById("step1").classList.add("hidden");
+    document.getElementById("step2").classList.remove("hidden");
+  }
+
+  function goToStep3() {
+    document.getElementById("step2").classList.add("hidden");
+    document.getElementById("step3").classList.remove("hidden");
+  }
+
+  const fileInput = document.getElementById("fileInput");
+  const preview = document.getElementById("preview");
+
+  fileInput.addEventListener("change", function(event) {
+    const files = event.target.files;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        images.push({
+          image: e.target.result,
+          label: ""
+        });
+
+        renderImages();
+      };
+
+      reader.readAsDataURL(file);
+    }
+  });
+
+  function renderImages() {
+    preview.innerHTML = "";
+
+    images.forEach((img, index) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "img-wrapper";
+
+      const image = document.createElement("img");
+      image.src = img.image;
+
+      image.onclick = () => addLabel(index);
+
+      const label = document.createElement("div");
+      label.className = "img-label";
+      label.innerText = img.label ? img.label : "Tap to add label";
+
+      wrapper.appendChild(image);
+      wrapper.appendChild(label);
+
+      preview.appendChild(wrapper);
+    });
+  }
+
+  function addLabel(index) {
+    const current = images[index].label || "";
+    const newLabel = prompt("Enter label for this image:", current);
+
+    if (newLabel !== null) {
+      images[index].label = newLabel;
+      renderImages();
+    }
+  }
+
+  function startCamera() {
+    const video = document.getElementById("video");
+    const captureBtn = document.getElementById("captureBtn");
+    const closeBtn = document.getElementById("closeCameraBtn");
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("Camera not supported in this context.");
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false
+    })
+    .then(streamResult => {
+      stream = streamResult;
+      video.srcObject = stream;
+
+      video.classList.remove("hidden");
+      captureBtn.classList.remove("hidden");
+      closeBtn.classList.remove("hidden");
+    })
+    .catch(err => {
+      alert("Camera error: " + err.message);
+    });
+  }
+
+  function stopCamera() {
+    const video = document.getElementById("video");
+    const captureBtn = document.getElementById("captureBtn");
+    const closeBtn = document.getElementById("closeCameraBtn");
+
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+
+    video.srcObject = null;
+    video.classList.add("hidden");
+    captureBtn.classList.add("hidden");
+    closeBtn.classList.add("hidden");
+  }
+
+  function capturePhoto() {
+    const video = document.getElementById("video");
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+
+    images.push({
+      image: canvas.toDataURL("image/png"),
+      label: ""
+    });
+
+    renderImages();
+  }
+
+  function generatePDF() {
+    if (!window.jspdf) {
+      alert("PDF library not loaded yet. Please reload page.");
+      return;
+    }
+
+    const jsPDF = window.jspdf.jsPDF;
+    const doc = new jsPDF();
+
+    const date = document.getElementById("date").value;
+    const technician = document.getElementById("technician").value;
+
+    doc.setFontSize(14);
+    doc.text("Ticket Report", 10, 10);
+
+    doc.setFontSize(10);
+    doc.text("Date: " + date, 10, 20);
+    doc.text("Technician: " + technician, 10, 30);
+
+    let y = 40;
+
+    images.forEach(imgObj => {
+
+      if (y > 250) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.setFontSize(10);
+      doc.text("Label: " + (imgObj.label || "No label"), 10, y);
+      y += 5;
+
+      const pageWidth = 180;
+
+// create temporary image to read natural ratio
+const img = new Image();
+img.src = imgObj.image;
+
+// we must force synchronous layout calculation
+const imgProps = doc.getImageProperties(imgObj.image);
+
+const pdfWidth = pageWidth;
+const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+// page break check (important)
+if (y + pdfHeight > 280) {
+  doc.addPage();
+  y = 20;
+}
+
+doc.addImage(imgObj.image, "PNG", 10, y, pdfWidth, pdfHeight);
+y += pdfHeight + 10;
+    });
+
+    doc.save("ticket-report.pdf");
+  }
+</script>
+
+</body>
+</html>
